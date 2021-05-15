@@ -1,0 +1,28 @@
+path:
+  ckpt_path: "./output/ckpt/LJSpeech"
+  log_path: "./output/log/LJSpeech"
+  result_path: "./output/result/LJSpeech"
+loss:
+  gamma: 0.05
+  warp: 128
+  bandwidth: 60
+  lambda: 100
+  kl_start: 6000
+  kl_end: 50000
+  kl_upper: 1.0
+optimizer:
+  batch_size: 3
+  betas: [0.9, 0.98]
+  eps: 0.000000001
+  weight_decay: 0.0
+  grad_clip_thresh: 1.0
+  grad_acc_step: 1
+  warm_up_step: 10000
+  anneal_steps: [300000, 400000, 500000]
+  anneal_rate: 0.3
+step:
+  total_step: 900000
+  log_step: 50
+  synth_step: 50
+  val_step: 1000
+  save_step: 100000
