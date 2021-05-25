@@ -9,7 +9,7 @@ loss:
   lambda: 100
   kl_start: 6000
   kl_end: 50000
-  kl_upper: 1.0
+  kl_upper: 0.01
 optimizer:
   batch_size: 3
   betas: [0.9, 0.98]

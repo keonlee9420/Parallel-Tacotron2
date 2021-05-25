@@ -68,10 +68,10 @@ class ParallelTacotron2(nn.Module):
         encodings = torch.cat([text_encoding, residual_encoding, speaker_embedding], dim=-1)
 
         # Duration Modeling
-        log_durations, V = self.duration_predictor(encodings, src_masks)
+        durations, V = self.duration_predictor(encodings, src_masks)
 
-        upsampled_rep, mel_masks, mel_lens = \
-            self.learned_upsampling(log_durations, V, src_lens, src_masks, max_src_len)
+        upsampled_rep, mel_masks, mel_lens, Ws = \
+            self.learned_upsampling(durations, V, src_lens, src_masks, max_src_len)
 
         # Decoder
         mel_iters, mel_masks = self.decoder(upsampled_rep, mel_masks)
@@ -82,8 +82,9 @@ class ParallelTacotron2(nn.Module):
             mel_lens,
             src_masks,
             src_lens,
-            log_durations,
+            durations,
             mus,
             log_vars,
-            attns
+            attns,
+            Ws,
         )

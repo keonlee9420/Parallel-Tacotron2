@@ -11,7 +11,13 @@ Pytorch Implementation of Google's [Parallel Tacotron 2: A Non-Autoregressive Ne
 </p>
 
 # Updates
+- 2021.05.25: `Only the soft-DTW remains the last hurdle!` Following the author's advice on the implementation, I took several tests on each module one by one under a supervised duration signal with L1 loss (FastSpeech2). Until now, I can confirm that all modules except soft-DTW are working well as follows (Synthesized Spectrogram, GT Spectrogram, Residual Alignment, and W from LearnedUpsampling from top to bottom).
 
+    <p align="center">
+        <img src="img/debugging.png" width="80%">
+    </p>
+
+    For the details, please check the latest commit log and the updated Implementation Issues section. Also, you can find the ongoing experiments at [https://github.com/keonlee9420/FastSpeech2/commits/ptaco2](https://github.com/keonlee9420/FastSpeech2/commits/ptaco2).
 - 2021.05.15: Implementation done. Sanity checks on training and inference. But still the model cannot converge.
 
     `I'm waiting for your contribution!` Please inform me if you find any mistakes in my implementation or any valuable advice to train the model successfully. See the Implementation Issues section.
@@ -59,6 +65,24 @@ python3 train.py -p config/LJSpeech/preprocess.yaml -m config/LJSpeech/model.yam
 
 The model cannot converge yet. I'm debugging but it would be boosted if your awesome contribution is ready!
 
+# Inference
+
+## Inference
+
+For a single inference, run
+```
+python3 synthesize.py --text "YOUR_DESIRED_TEXT" --restore_step 900000 --mode single -p config/LJSpeech/preprocess.yaml -m config/LJSpeech/model.yaml -t config/LJSpeech/train.yaml
+```
+The generated utterances will be saved in `output/result/`.
+
+## Batch Inference
+
+Batch inference is also supported, try
+```
+python3 synthesize.py --source preprocessed_data/LJSpeech/val.txt --restore_step 900000 --mode batch -p config/LJSpeech/preprocess.yaml -m config/LJSpeech/model.yaml -t config/LJSpeech/train.yaml
+```
+to synthesize all utterances in `preprocessed_data/LJSpeech/val.txt`.
+
 # TensorBoard
 
 Use
@@ -71,7 +95,7 @@ to serve TensorBoard on your localhost.
 
 # Implementation Issues
 
-Overall, normalization or activation, which is not suggested in the original paper, is adequately arranged to prevent nan value (gradient) on forward and backward calculations.
+Overall, normalization or activation, which is not suggested in the original paper, is adequately arranged to prevent NaN value (gradient) on forward and backward calculations. (NaN indicates that something is wrong in the network)
 
 ## Text Encoder
 
@@ -86,15 +110,14 @@ Overall, normalization or activation, which is not suggested in the original pap
 1. Use `80 channels` mel-spectrogrom instead of `128-bin`.
 2. Regular sinusoidal positional embedding is used in frame-level instead of combinations of three positional embeddings in Parallel Tacotron. As the model depends entirely on unsupervised learning for the position, this choice can be a reason for the fails on model converge.
 
-## Duration Predictor & Learned Upsampling (The most important but ambiguous part)
+## Duration Predictor & Learned Upsampling
 
-1. Use log durations with the prior: there should be at least one frame in total per sequence. 
-2. Use `nn.SiLU()` for the swish activation.
-3. When obtaining `W` and `C`, concatenation operation is applied among `S`, `E`, and `V` after frame-domain (T domain) broadcasting of `V`. As the detailed process is not described in the original paper, this choice can be a reason for the fails on model converge.
+1. Use `nn.SiLU()` for the swish activation.
+2. When obtaining `W` and `C`, concatenation operation is applied among `S`, `E`, and `V` after frame-domain (T domain) broadcasting of `V`.
 
 ## Decoder
 
-1. Use (Multi-head) `Self-attention` and `LConvBlock`.
+1. Use `LConvBlock` and regular sinusoidal positional embedding.
 2. Iterative mel-spectrogram is projected by a linear layer.
 3. Apply `nn.Tanh()` to each `LConvBLock` output (following activation pattern of decoder part in FastSpeech2).
 
@@ -106,8 +129,7 @@ Overall, normalization or activation, which is not suggested in the original pap
     2. In the original soft-DTW, the final loss is not assumed and therefore only `E` is computed. But employed as a loss function, jacobian product is added to return target derivetive of `R` w.r.t. input `X`.
     3. Currently, the maximum batch size is `6` in 24GiB GPU (TITAN RTX) due to space complexity problem in soft-DTW Loss.
         - In the original paper, a custom differentiable diagonal band operation was implemented and used to solve the complexity of O(T^2), but this part has not been explored in the current implementation yet.
-3. For the stability, mel-spectrogroms are compressed by a sigmoid function before the soft-DTW. If the sigmoid is eliminated, the soft-DTW value is too large, producing nan in the backward.
-4. Guided attention loss is applied for fast convergence of the attention module in residual encoder.
+3. For the stability, mel-spectrogroms are compressed by a sigmoid function before the soft-DTW. If the sigmoid is eliminated, the soft-DTW value is too large, producing NaN in the backward. (Finally, sigmoid should be removed.)
 
 # Citation
 

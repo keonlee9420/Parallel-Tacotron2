@@ -208,21 +208,13 @@ class ResidualEncoder(nn.Module):
             mu = log_var = torch.zeros([batch_size, max_src_len, self.d_latent], device=device)
             attn = None
         else:
-            max_len = mel.shape[1]
             speaker_embedding_m = speaker_embedding.unsqueeze(1).expand(
                 -1, max_mel_len, -1
             )
 
-            if not self.training and mel.shape[1] > self.max_seq_len:
-                position_enc = get_sinusoid_encoding_table(
-                    mel.shape[1], self.d_encoder
-                )[: mel.shape[1], :].unsqueeze(0).expand(batch_size, -1, -1).to(
-                    mel.device
-                )
-            else:
-                position_enc = self.position_enc[
-                    :, :max_len, :
-                ].expand(batch_size, -1, -1)
+            position_enc = self.position_enc[
+                :, :max_mel_len, :
+            ].expand(batch_size, -1, -1)
 
             enc_input = torch.cat([position_enc, speaker_embedding_m, mel], dim=-1)
             enc_output = self.input_linear(enc_input)
@@ -288,12 +280,12 @@ class DurationPredictor(nn.Module):
                 V, mask=mask
             )
 
-        log_duration = F.softplus(self.projection(V))
+        duration = F.softplus(self.projection(V))
         if mask is not None:
-            log_duration = log_duration.masked_fill(mask.unsqueeze(-1), 0)
-        log_duration = log_duration.squeeze(-1)
+            duration = duration.masked_fill(mask.unsqueeze(-1), 0)
+        duration = duration.squeeze(-1)
 
-        return log_duration, V
+        return duration, V
 
 
 class LearnedUpsampling(nn.Module):
@@ -332,13 +324,11 @@ class LearnedUpsampling(nn.Module):
         self.linear_einsum = LinearNorm(dim_c, d_predictor) # A
         self.layer_norm = nn.LayerNorm(d_predictor)
 
-    def forward(self, log_duration, V, src_len, src_mask, max_src_len):
+    def forward(self, duration, V, src_len, src_mask, max_src_len):
 
-        batch_size = log_duration.shape[0]
+        batch_size = duration.shape[0]
 
-        # Log Duration Interpretation
-        log_duration = torch.clamp(log_duration, max=math.log(self.max_seq_len))
-        duration = torch.maximum(torch.exp(log_duration) - 1, torch.ones_like(log_duration)) # prior: at least 1 frame in total
+        # Duration Interpretation
         mel_len = torch.round(duration.sum(-1)).type(torch.LongTensor).to(device)
         mel_len = torch.clamp(mel_len, max=self.max_seq_len)
         max_mel_len = mel_len.max().item()
@@ -372,7 +362,7 @@ class LearnedUpsampling(nn.Module):
         upsampled_rep = self.layer_norm(upsampled_rep)
         upsampled_rep = upsampled_rep.masked_fill(mel_mask.unsqueeze(-1), 0)
 
-        return upsampled_rep, mel_mask, mel_len
+        return upsampled_rep, mel_mask, mel_len, W
 
 
 class Decoder(nn.Module):
@@ -380,6 +370,7 @@ class Decoder(nn.Module):
 
     def __init__(self, config):
         super(Decoder, self).__init__()
+        n_position = config["max_seq_len"] + 1
         n_mel_channels = config["n_mel_channels"]
         d_decoder = config["decoder"]["decoder_hidden"]
         n_layers = config["decoder"]["decoder_layer"]
@@ -395,13 +386,9 @@ class Decoder(nn.Module):
         self.n_layers = n_layers
         self.max_seq_len = config["max_seq_len"]
 
-        self.self_attention_stack = nn.ModuleList(
-            [
-                MultiHeadAttention(
-                    n_head_trans, d_decoder, d_k, d_v, dropout=dropout
-                )
-                for _ in range(n_layers)
-            ]
+        self.position_enc = nn.Parameter(
+            get_sinusoid_encoding_table(n_position, d_decoder).unsqueeze(0),
+            requires_grad=False,
         )
 
         self.convolution_stack = nn.ModuleList(
@@ -425,20 +412,24 @@ class Decoder(nn.Module):
     def forward(self, x, mask):
 
         mel_iters = list()
-        max_len = x.shape[1]
-
-        max_len = min(max_len, self.max_seq_len)
-        slf_attn_mask = mask.unsqueeze(1).expand(-1, max_len, -1)
-
-        mask = mask[:, :max_len]
-        slf_attn_mask = slf_attn_mask[:, :, :max_len]
+        batch_size, max_len = x.shape[0], x.shape[1]
 
         dec_output = x
 
-        for i, (self_attn, conv, linear) in enumerate(zip(self.self_attention_stack, self.convolution_stack, self.mel_projection)):
-            dec_output, _ = self_attn(
-                dec_output, dec_output, dec_output, mask=slf_attn_mask
+        if not self.training and max_len > self.max_seq_len:
+            dec_output = dec_output + get_sinusoid_encoding_table(
+                max_len, self.d_decoder
+            )[: max_len, :].unsqueeze(0).expand(batch_size, -1, -1).to(
+                x.device
             )
+        else:
+            max_len = min(max_len, self.max_seq_len)
+            dec_output = dec_output + self.position_enc[
+                :, :max_len, :
+            ].expand(batch_size, -1, -1)
+            mask = mask[:, :max_len]
+
+        for i, (conv, linear) in enumerate(zip(self.convolution_stack, self.mel_projection)):
             dec_output = dec_output.masked_fill(mask.unsqueeze(-1), 0)
             dec_output = torch.tanh(conv(
                 dec_output, mask=mask

@@ -65,8 +65,7 @@ def log(
         logger.add_scalar("Loss/mel_loss", losses[1], step)
         logger.add_scalar("Loss/duration_loss", losses[2], step)
         logger.add_scalar("Loss/kl_loss", losses[3], step)
-        logger.add_scalar("Loss/attn_loss", losses[4], step)
-        logger.add_scalar("Loss/beta", losses[5], step)
+        logger.add_scalar("Loss/kl_beta", losses[4], step)
 
     if fig is not None:
         logger.add_figure(tag, fig)
@@ -105,14 +104,16 @@ def synth_one_sample(targets, predictions, vocoder, model_config, preprocess_con
     mel_target = targets[6][0, :mel_len_target].detach().transpose(0, 1)
     mel_prediction = predictions[0][-1][0, :mel_len_prediction].detach().transpose(0, 1) # Last Iter Mel
     attn = predictions[8][0].detach() # [seq_len, mel_len]
+    W = predictions[9][0].transpose(-2, -1).detach() # [seq_len, mel_len]
 
     fig = plot_mel(
         [
             mel_prediction.cpu().numpy(),
             mel_target.cpu().numpy(),
-            attn.cpu().numpy()
+            attn.cpu().numpy(),
+            W.cpu().numpy()
         ],
-        ["Synthetized Spectrogram", "Ground-Truth Spectrogram", "Residual Alignment"],
+        ["Synthetized Spectrogram", "Ground-Truth Spectrogram", "Residual Alignment", "W"],
     )
 
     if vocoder is not None:
@@ -148,6 +149,7 @@ def synth_samples(targets, predictions, vocoder, model_config, preprocess_config
         fig = plot_mel(
         [
             mel_prediction.cpu().numpy(),
+            None,
             None
         ],
         ["Synthetized Spectrogram"],
@@ -169,27 +171,28 @@ def synth_samples(targets, predictions, vocoder, model_config, preprocess_config
 
 
 def plot_mel(data, titles):
-    assert len(data) >= 2, "data must be greater or equal to 2" 
-    if data[-1] is not None:
+    assert len(data) >= 3, "data must be greater or equal to 2" 
+    if data[-2] is not None and data[-1] is not None:
         fig, axes = plt.subplots(len(data), 1, squeeze=False)
         if titles is None:
             titles = [None for i in range(len(data))]
 
         # Plot Mel Spectrogram
-        plot_(axes, data[:-1], titles)
+        plot_(axes, data[:-2], titles)
 
         # Plot Alignment
-        im = axes[-1][0].imshow(data[-1], origin='lower', aspect='auto')
-        axes[-1][0].set_xlabel('Decoder timestep')
-        axes[-1][0].set_ylabel('Encoder timestep')
-        axes[-1][0].set_xlim(0, data[-2].shape[1])
-        axes[-1][0].set_title(titles[-1], fontsize="medium")
-        axes[-1][0].tick_params(labelsize="x-small")
-        axes[-1][0].set_anchor("W")
-        fig.colorbar(im, ax=axes[-1][0])
-        fig.tight_layout()
+        xlims = [data[1].shape[1], data[0].shape[1]]
+        for i in range(-2, 0):
+            im = axes[i][0].imshow(data[i], origin='lower', aspect='auto')
+            axes[i][0].set_xlabel('Decoder timestep')
+            axes[i][0].set_ylabel('Encoder timestep')
+            axes[i][0].set_xlim(0, xlims[i])
+            axes[i][0].set_title(titles[i], fontsize="medium")
+            axes[i][0].tick_params(labelsize="x-small")
+            axes[i][0].set_anchor("W")
+            fig.colorbar(im, ax=axes[i][0])
     else:
-        data = data[:-1]
+        data = data[:-2]
         fig, axes = plt.subplots(len(data), 1, squeeze=False)
         if titles is None:
             titles = [None for i in range(len(data))]
