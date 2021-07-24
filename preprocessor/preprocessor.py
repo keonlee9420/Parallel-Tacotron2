@@ -38,6 +38,8 @@ class Preprocessor:
 
         print("Processing Data ...")
         out = list()
+        mel_min = float('inf')
+        mel_max = -float('inf')
         n_frames = 0
 
         # Compute pitch, energy, duration, and mel-spectrogram
@@ -54,14 +56,28 @@ class Preprocessor:
                 if ret is None:
                     continue
                 else:
-                    info, n = ret
+                    info, n, m_min, m_max = ret
                 out.append(info)
+
+                if mel_min > m_min:
+                    mel_min = m_min
+                if mel_max < m_max:
+                    mel_max = m_max
 
                 n_frames += n
 
         # Save files
         with open(os.path.join(self.out_dir, "speakers.json"), "w") as f:
             f.write(json.dumps(speakers))
+
+        with open(os.path.join(self.out_dir, "stats.json"), "w") as f:
+            stats = {
+                "mel": [
+                    float(mel_min),
+                    float(mel_max),
+                ],
+            }
+            f.write(json.dumps(stats))
 
         print(
             "Total time: {} hours".format(
@@ -116,4 +132,6 @@ class Preprocessor:
         return (
             "|".join([basename, speaker, text, raw_text]),
             mel_spectrogram.shape[1],
+            np.min(mel_spectrogram),
+            np.max(mel_spectrogram),
         )

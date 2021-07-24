@@ -15,12 +15,12 @@ from dataset import Dataset
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def evaluate(model, step, configs, logger=None, vocoder=None):
+def evaluate(model, step, configs, logger=None, vocoder=None, losses_len=6, mel_stats=None):
     preprocess_config, model_config, train_config = configs
 
     # Get dataset
     dataset = Dataset(
-        "val.txt", preprocess_config, train_config, sort=False, drop_last=False
+        "val.txt", preprocess_config, train_config, sort=True, drop_last=False
     )
     batch_size = train_config["optimizer"]["batch_size"]
     loader = DataLoader(
@@ -34,10 +34,10 @@ def evaluate(model, step, configs, logger=None, vocoder=None):
     Loss = ParallelTacotron2Loss(model_config, train_config).to(device)
 
     # Evaluation
-    loss_sums = [0 for _ in range(6)]
+    loss_sums = [0 for _ in range(losses_len)]
     for batchs in loader:
         for batch in batchs:
-            batch = to_device(batch, device)
+            batch = to_device(batch, device, mel_stats)
             with torch.no_grad():
                 # Forward
                 output = model(*(batch[2:]))
@@ -61,6 +61,7 @@ def evaluate(model, step, configs, logger=None, vocoder=None):
             vocoder,
             model_config,
             preprocess_config,
+            mel_stats,
         )
 
         log(logger, step, losses=loss_means)

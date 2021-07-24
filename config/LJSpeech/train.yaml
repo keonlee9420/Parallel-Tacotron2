@@ -11,7 +11,7 @@ loss:
   kl_end: 50000
   kl_upper: 0.01
 optimizer:
-  batch_size: 3
+  batch_size: 8
   betas: [0.9, 0.98]
   eps: 0.000000001
   weight_decay: 0.0
@@ -20,9 +20,10 @@ optimizer:
   warm_up_step: 10000
   anneal_steps: [300000, 400000, 500000]
   anneal_rate: 0.3
+  init_lr: 0.005
 step:
   total_step: 900000
-  log_step: 50
-  synth_step: 50
+  log_step: 100
+  synth_step: 500
   val_step: 1000
-  save_step: 100000
+  save_step: 50000

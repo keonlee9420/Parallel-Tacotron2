@@ -32,7 +32,7 @@ Pytorch Implementation of Google's [Parallel Tacotron 2: A Non-Autoregressive Ne
     pip3 install -r requirements.txt
     ```
 
-- In addition to that, install fairseq ([official document](https://fairseq.readthedocs.io/en/latest/index.html), [github](https://github.com/pytorch/fairseq)) to utilize `LConvBlock`.
+- Install fairseq ([official document](https://fairseq.readthedocs.io/en/latest/index.html), [github](https://github.com/pytorch/fairseq)) to utilize `LConvBlock`. Please check [#5](https://github.com/keonlee9420/Parallel-Tacotron2/issues/5) to resolve any issue on installing.
 
 ## Datasets
 
@@ -127,9 +127,8 @@ Overall, normalization or activation, which is not suggested in the original pap
 2. Base on [pytorch-softdtw-cuda](https://github.com/Maghoumi/pytorch-softdtw-cuda) ([post](https://www.codefull.net/2020/05/fast-differentiable-soft-dtw-for-pytorch-using-cuda/)) for the soft-DTW.
     1. Implement customized soft-DTW in `model/soft_dtw_cuda.py`, reflecting the recursion suggested in the original paper.
     2. In the original soft-DTW, the final loss is not assumed and therefore only `E` is computed. But employed as a loss function, jacobian product is added to return target derivetive of `R` w.r.t. input `X`.
-    3. Currently, the maximum batch size is `6` in 24GiB GPU (TITAN RTX) due to space complexity problem in soft-DTW Loss.
+    3. Currently, the maximum batch size is `8` in 24GiB GPU (TITAN RTX) due to space complexity problem in soft-DTW Loss.
         - In the original paper, a custom differentiable diagonal band operation was implemented and used to solve the complexity of O(T^2), but this part has not been explored in the current implementation yet.
-3. For the stability, mel-spectrogroms are compressed by a sigmoid function before the soft-DTW. If the sigmoid is eliminated, the soft-DTW value is too large, producing NaN in the backward. (Finally, sigmoid should be removed.)
 
 # Citation
 

@@ -58,12 +58,9 @@ class ParallelTacotron2Loss(nn.Module):
         mel_lens_targets.requires_grad = False
 
         # Iterative Loss Using Soft-DTW
-        mel_iter_loss = 0
-        mel_targets_comp = torch.sigmoid(mel_targets)
+        mel_iter_loss = torch.zeros_like(mel_lens_targets, dtype=mel_targets.dtype)
         for mel_iter in mel_iters:
-            mel_iter_comp = torch.sigmoid(mel_iter)
-            mel_iter_loss += self.sdtw_loss(mel_iter_comp, mel_targets_comp).mean()
-            # mel_iter_loss += self.sdtw_loss(mel_iter, mel_targets).mean()
+            mel_iter_loss += self.sdtw_loss(mel_iter, mel_targets)
         mel_loss = (mel_iter_loss / (len(mel_iters) * mel_lens_targets)).mean()
 
         # Duration Loss

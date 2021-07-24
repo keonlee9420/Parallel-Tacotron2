@@ -1,4 +1,6 @@
 import re
+import os
+import json
 import argparse
 from string import punctuation
 
@@ -33,11 +35,11 @@ def preprocess_english(text, preprocess_config):
     return np.array(sequence)
 
 
-def synthesize(model, step, configs, vocoder, batchs):
+def synthesize(model, step, configs, vocoder, batchs, mel_stats):
     preprocess_config, model_config, train_config = configs
 
     for batch in batchs:
-        batch = to_device(batch, device)
+        batch = to_device(batch, device, mel_stats)
         with torch.no_grad():
             # Forward
             output = model(
@@ -50,6 +52,7 @@ def synthesize(model, step, configs, vocoder, batchs):
                 model_config,
                 preprocess_config,
                 train_config["path"]["result_path"],
+                mel_stats,
             )
 
 
@@ -110,6 +113,11 @@ if __name__ == "__main__":
     model_config = yaml.load(open(args.model_config, "r"), Loader=yaml.FullLoader)
     train_config = yaml.load(open(args.train_config, "r"), Loader=yaml.FullLoader)
     configs = (preprocess_config, model_config, train_config)
+    with open(
+        os.path.join(preprocess_config["path"]["preprocessed_path"], "stats.json")
+    ) as f:
+        stats = json.load(f)
+        mel_stats = stats["mel"]
 
     # Get model
     model = get_model(args, configs, device, train=False)
@@ -134,4 +142,4 @@ if __name__ == "__main__":
         text_lens = np.array([len(texts[0])])
         batchs = [(ids, raw_texts, speakers, texts, text_lens, max(text_lens))]
 
-    synthesize(model, args.restore_step, configs, vocoder, batchs)
+    synthesize(model, args.restore_step, configs, vocoder, batchs, mel_stats)

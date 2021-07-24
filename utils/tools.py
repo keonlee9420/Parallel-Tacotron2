@@ -15,7 +15,7 @@ matplotlib.use("Agg")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def to_device(data, device):
+def to_device(data, device, mel_stats=None):
     if len(data) == 9:
         (
             ids,
@@ -33,6 +33,7 @@ def to_device(data, device):
         texts = torch.from_numpy(texts).long().to(device)
         src_lens = torch.from_numpy(src_lens).to(device)
         mels = torch.from_numpy(mels).float().to(device)
+        mels = mel_normalize(mels, *mel_stats)
         mel_lens = torch.from_numpy(mel_lens).to(device)
 
         return (
@@ -96,13 +97,22 @@ def expand(values, durations):
     return np.array(out)
 
 
-def synth_one_sample(targets, predictions, vocoder, model_config, preprocess_config):
+def mel_normalize(mel, m_min, m_max):
+    return 2 * (mel - m_min)/(m_max-m_min) - 1
+
+
+def mel_denormalize(mel_norm, m_min, m_max):
+    return (m_max - m_min) * ((mel_norm)+1)/2 + m_min
+
+
+def synth_one_sample(targets, predictions, vocoder, model_config, preprocess_config, mel_stats):
 
     basename = targets[0][0]
     mel_len_target = targets[7][0].item()
     mel_len_prediction = predictions[2][0].item()
-    mel_target = targets[6][0, :mel_len_target].detach().transpose(0, 1)
-    mel_prediction = predictions[0][-1][0, :mel_len_prediction].detach().transpose(0, 1) # Last Iter Mel
+    mel_target = mel_denormalize(targets[6][0, :mel_len_target], *mel_stats).detach().transpose(0, 1)
+    mel_prediction = mel_denormalize(
+        predictions[0][-1][0, :mel_len_prediction], *mel_stats).detach().transpose(0, 1) # Last Iter Mel
     attn = predictions[8][0].detach() # [seq_len, mel_len]
     W = predictions[9][0].transpose(-2, -1).detach() # [seq_len, mel_len]
 
@@ -137,14 +147,15 @@ def synth_one_sample(targets, predictions, vocoder, model_config, preprocess_con
     return fig, wav_reconstruction, wav_prediction, basename
 
 
-def synth_samples(targets, predictions, vocoder, model_config, preprocess_config, path):
+def synth_samples(targets, predictions, vocoder, model_config, preprocess_config, path, mel_stats):
 
     basenames = targets[0]
     for i in range(len(predictions[0])):
         basename = basenames[i]
         src_len = predictions[4][i].item()
         mel_len = predictions[2][i].item()
-        mel_prediction = predictions[0][-1][i, :mel_len].detach().transpose(0, 1) # Last Iter Mel
+        mel_prediction = mel_denormalize(
+            predictions[0][-1][i, :mel_len], *mel_stats).detach().transpose(0, 1) # Last Iter Mel
 
         fig = plot_mel(
         [
@@ -159,7 +170,7 @@ def synth_samples(targets, predictions, vocoder, model_config, preprocess_config
 
     from .model import vocoder_infer
 
-    mel_predictions = predictions[0][-1].transpose(1, 2)
+    mel_predictions = mel_denormalize(predictions[0][-1], *mel_stats).transpose(1, 2)
     lengths = predictions[2] * preprocess_config["preprocessing"]["stft"]["hop_length"]
     wav_predictions = vocoder_infer(
         mel_predictions, vocoder, model_config, preprocess_config, lengths=lengths
