@@ -268,11 +268,11 @@ class VariableLengthAttention(nn.Module):
         k = self.w_ks(mel_encoding)
         v = self.w_vs(mel_encoding)
 
-        src_mask = src_mask.float().unsqueeze(-1) # [batch, seq_len, 1]
-        mel_mask = mel_mask.float().unsqueeze(-1) # [batch, mel_len, 1]
-        attn_mask = torch.bmm(src_mask, mel_mask.transpose(-2, -1)).bool() # [batch, seq_len, mel_len]
+        src_len, mel_len = src_mask.shape[1], mel_mask.shape[1]
+        src_mask_ = src_mask.unsqueeze(-1).expand(-1, -1, mel_len) # [batch, seq_len, mel_len]
+        mel_mask_ = mel_mask.unsqueeze(1).expand(-1, src_len, -1) # [batch, seq_len, mel_len]
 
-        output, attn = self.attention(q, k, v, mask=attn_mask)
+        output, attn = self.attention(q, k, v, src_mask=src_mask_, mel_mask=mel_mask_)
 
         output = self.layer_norm(self.dropout(output))
 
@@ -287,15 +287,21 @@ class ScaledDotProductAttention(nn.Module):
         self.temperature = temperature
         self.softmax = nn.Softmax(dim=2)
 
-    def forward(self, q, k, v, mask=None):
+    def forward(self, q, k, v, mask=None, src_mask=None, mel_mask=None):
 
         attn = torch.bmm(q, k.transpose(1, 2))
         attn = attn / self.temperature
 
         if mask is not None:
             attn = attn.masked_fill(mask, -np.inf)
+            attn = self.softmax(attn)
+        elif src_mask is not None and mel_mask is not None:
+            attn = attn.masked_fill(mel_mask, -np.inf)
+            attn = self.softmax(attn)
+            attn = attn.masked_fill(src_mask, 0.)
+        else:
+            attn = self.softmax(attn)
 
-        attn = self.softmax(attn)
         output = torch.bmm(attn, v)
 
         return output, attn
