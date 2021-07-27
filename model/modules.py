@@ -335,9 +335,12 @@ class LearnedUpsampling(nn.Module):
         mel_mask = get_mask_from_lengths(mel_len, max_mel_len)
 
         # Prepare Attention Mask
-        src_mask_ = src_mask.float().unsqueeze(-1) # [B, src_len, 1]
-        mel_mask_ = mel_mask.float().unsqueeze(-1) # [B, tgt_len, 1]
-        attn_mask = torch.bmm(mel_mask_, src_mask_.transpose(-2, -1)).bool() # [B, tgt_len, src_len]
+        src_mask_ = src_mask.unsqueeze(1).expand(-1, mel_mask.shape[1], -1) # [B, tat_len, src_len]
+        mel_mask_ = mel_mask.unsqueeze(-1).expand(-1, -1, src_mask.shape[1]) # [B, tgt_len, src_len]
+        attn_mask = torch.zeros((src_mask.shape[0], mel_mask.shape[1], src_mask.shape[1])).to(device)
+        attn_mask = attn_mask.masked_fill(src_mask_, 1.)
+        attn_mask = attn_mask.masked_fill(mel_mask_, 1.)
+        attn_mask = attn_mask.bool()
 
         # Token Boundary Grid
         e_k = torch.cumsum(duration, dim=1)
@@ -351,9 +354,10 @@ class LearnedUpsampling(nn.Module):
 
         # Attention (W)
         W = self.swish_w(S, E, self.conv_w(V)) # [B, T, K, dim_w]
-        W = self.linear_w(W).squeeze(-1).masked_fill(attn_mask, -np.inf)
-        W = self.softmax_w(W)
-
+        W = self.linear_w(W).squeeze(-1).masked_fill(src_mask_, -np.inf) #[B, T, K]
+        W = self.softmax_w(W) #[B, T, K]
+        W = W.masked_fill(mel_mask_, 0.)
+        
         # Auxiliary Attention Context (C)
         C = self.swish_c(S, E, self.conv_c(V)) # [B, T, K, dim_c]
 

@@ -105,7 +105,7 @@ class _SoftDTWCUDA(Function):
         B = D.shape[0]
         N = D.shape[1]
         M = D.shape[2]
-        threads_per_block = max(N, M)
+        threads_per_block = max(N + 1, M + 1)
         n_passes = 2 * threads_per_block - 1
 
         D_ = torch.zeros((B, N + 2, M + 2), dtype=dtype, device=dev)
@@ -118,10 +118,10 @@ class _SoftDTWCUDA(Function):
         R[:, 0, 0] = 0
 
         compute_softdtw_cuda[B, threads_per_block](cuda.as_cuda_array(D_.detach()),
-                                                   gamma.item(), warp.item(), bandwidth.item(), N, M, n_passes,
+                                                   gamma.item(), warp.item(), bandwidth.item(), N + 1, M + 1, n_passes,
                                                    cuda.as_cuda_array(R))
         ctx.save_for_backward(X, raw_D, D, R, gamma, warp, bandwidth)
-        return R[:, -2, -2]
+        return R[:, -1, -1]
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -139,10 +139,6 @@ class _SoftDTWCUDA(Function):
         D_ = torch.zeros((B, N + 2, M + 2), dtype=dtype, device=dev)
         D_[:, 1:N + 1, 1:M + 1] = D
 
-        R[:, :, -1] = -math.inf
-        R[:, -1, :] = -math.inf
-        R[:, -1, -1] = R[:, -2, -2]
-
         E = torch.zeros((B, N + 2, M + 2), dtype=dtype, device=dev)
         E[:, -1, -1] = 1
 
@@ -155,8 +151,9 @@ class _SoftDTWCUDA(Function):
                                                             cuda.as_cuda_array(E), cuda.as_cuda_array(G))
         G = G[:, 1:N + 1, 1:M + 1] # dR_D
 
-        tmp_G = G*torch.sign(raw_D)
-        dR_X = tmp_G.matmul(torch.ones(B, M, H, dtype=dtype, device=dev))
+        tmp_G = G.unsqueeze(-1).expand(-1, -1, -1, H)
+        tmp_G = tmp_G * torch.sign(raw_D)
+        dR_X = tmp_G.sum(dim=2)
 
         return grad_output.view(-1, 1, 1).expand_as(dR_X) * dR_X, None, None, None, None, None
 
@@ -173,16 +170,16 @@ def cpu_compute_softdtw(D, gamma, warp, bandwidth):
     R[:, 0, :] = np.ones((B, 1)) * np.inf
     R[:, 0, 0] = 0
     for b in range(B):
-        for j in range(1, M + 1):
-            for i in range(1, N + 1):
+        for j in range(1, M + 2):
+            for i in range(1, N + 2):
 
                 # Check the pruning condition
                 if 0 < bandwidth < np.abs(i - j):
                     continue
 
-                r0 = -(R[b, i - 1, j - 1] + D[b, i - 1, j - 1]) / gamma
-                r1 = -(R[b, i - 1, j] + D[b, i - 1, j] + warp) / gamma
-                r2 = -(R[b, i, j - 1] + D[b, i, j - 1] + warp) / gamma
+                r0 = -(R[b, i - 1, j - 1] + D_[b, i - 1, j - 1]) / gamma
+                r1 = -(R[b, i - 1, j] + D_[b, i - 1, j] + warp) / gamma
+                r2 = -(R[b, i, j - 1] + D_[b, i, j - 1] + warp) / gamma
                 rmax = max(max(r0, r1), r2)
                 rsum = np.exp(r0 - rmax) + np.exp(r1 - rmax) + np.exp(r2 - rmax)
                 softmin = -gamma * (np.log(rsum) + rmax)
@@ -201,9 +198,6 @@ def cpu_compute_softdtw_backward(D_, R, gamma, warp, bandwidth):
     D[:, 1:N + 1, 1:M + 1] = D_
     E[:, -1, -1] = 1
     G[:, -1, -1] = 1
-    R[:, :, -1] = -np.inf
-    R[:, -1, :] = -np.inf
-    R[:, -1, -1] = R[:, -2, -2]
     for k in range(B):
         for j in range(M, 0, -1):
             for i in range(N, 0, -1):
@@ -242,21 +236,23 @@ class CPUSoftDTW(Function):
         b_ = bandwidth.item()
         R = torch.Tensor(cpu_compute_softdtw(D_, g_, w_, b_)).to(dev).type(dtype)
         ctx.save_for_backward(X, raw_D, D, R, gamma, warp, bandwidth)
-        return R[:, -2, -2]
+        return R[:, -1, -1]
 
     @staticmethod
     def backward(ctx, grad_output):
         dev = grad_output.device
         dtype = grad_output.dtype
         X, raw_D, D, R, gamma, warp, bandwidth = ctx.saved_tensors
+        H = X.shape[2]
         D_ = D.detach().cpu().numpy()
         R_ = R.detach().cpu().numpy()
         g_ = gamma.item()
         w_ = warp.item()
         b_ = bandwidth.item()
         G = torch.Tensor(cpu_compute_softdtw_backward(D_, R_, g_, w_, b_)).to(dev).type(dtype)
-        tmp_G = G*torch.sign(raw_D)
-        dR_X = tmp_G.matmul(torch.ones(D.shape[0], D.shape[2], X.shape[2], dtype=dtype, device=dev))
+        tmp_G = G.unsqueeze(-1).expand(-1, -1, -1, H)
+        tmp_G = tmp_G * torch.sign(raw_D)
+        dR_X = tmp_G.sum(dim=2)
 
         return grad_output.view(-1, 1, 1).expand_as(dR_X) * dR_X, None, None, None, None, None
 
@@ -299,7 +295,7 @@ class SoftDTW(torch.nn.Module):
         d = x.size(2)
         x = x.unsqueeze(2).expand(-1, n, m, d)
         y = y.unsqueeze(1).expand(-1, n, m, d)
-        return torch.abs(x - y).sum(3), (x - y).sum(3)
+        return torch.abs(x - y).sum(3), (x - y)
 
     def forward(self, X, Y):
 

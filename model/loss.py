@@ -48,10 +48,6 @@ class ParallelTacotron2Loss(nn.Module):
             _,
             _,
         ) = predictions
-        src_masks = ~src_masks
-        mel_masks = ~mel_masks
-        mel_targets = mel_targets[:, : mel_masks.shape[1], :]
-        mel_masks = mel_masks[:, :mel_masks.shape[1]]
 
         src_lens_targets.requires_grad = False
         mel_targets.requires_grad = False
